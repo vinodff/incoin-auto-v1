@@ -1,0 +1,97 @@
+﻿Resolving dependencies...
+Downloading packages...
+  app_links 6.4.1 (7.0.0 available)
+  flutter_launcher_icons 0.13.1 (0.14.4 available)
+  intl 0.19.0 (0.20.2 available)
+  js 0.7.2 (discontinued)
+  meta 1.17.0 (1.18.1 available)
+  win32 5.15.0 (6.0.0 available)
+Got dependencies!
+1 package is discontinued.
+5 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Running Gradle task 'assembleRelease'...                        
+flutter : Warning: Flutter support for 
+your project's Kotlin version (1.9.24) 
+will soon be dropped. Please upgrade your 
+Kotlin version to a version of at least 
+2.1.0 soon.
+At line:1 char:1
++ flutter build apk --release > 
+build_output2.txt 2>&1 ; Set-Content -P ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified 
+   : (Warning: Flutte...ast 2.1.0 soon.:S  
+  tring) [], RemoteException
+    + FullyQualifiedErrorId : NativeComman 
+   dError
+ 
+Alternatively, use the flag "--android-skip
+-build-dependency-validation" to bypass 
+this check.
+
+Potential fix: Your project's KGP version 
+is typically defined in the plugins block 
+of the `settings.gradle` file (C:\MY 
+Projects\incoin 
+pro\incoin\android/settings.gradle), by a 
+plugin with the id of 
+org.jetbrains.kotlin.android. 
+If you don't see a plugins block, your 
+project was likely created with an older 
+template version, in which case it is most 
+likely defined in the top-level 
+build.gradle file (C:\MY Projects\incoin 
+pro\incoin\android/build.gradle) by the 
+ext.kotlin_version property.
+
+Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 6044 bytes (99.6% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task 
+':app:checkReleaseAarMetadata'.
+> A failure occurred while executing com.an
+droid.build.gradle.internal.tasks.CheckAarM
+etadataWorkAction
+   > 3 issues were found when checking AAR 
+metadata:
+
+       1.  Dependency 
+'androidx.activity:activity-ktx:1.12.4' 
+requires Android Gradle plugin 8.9.1 or 
+higher.
+
+           This build currently uses 
+Android Gradle plugin 8.7.3.
+
+       2.  Dependency 
+'androidx.activity:activity:1.12.4' 
+requires Android Gradle plugin 8.9.1 or 
+higher.
+
+           This build currently uses 
+Android Gradle plugin 8.7.3.
+
+       3.  Dependency 'androidx.navigatione
+vent:navigationevent-android:1.0.2' 
+requires Android Gradle plugin 8.9.1 or 
+higher.
+
+           This build currently uses 
+Android Gradle plugin 8.7.3.
+
+* Try:
+> Run with --stacktrace option to get the 
+stack trace.
+> Run with --info or --debug option to get 
+more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 8s
+Running Gradle task 'assembleRelease'...                            9.3s
+Gradle task assembleRelease failed with 
+exit code 1

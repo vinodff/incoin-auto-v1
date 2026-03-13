@@ -1,0 +1,33 @@
+﻿Resolving dependencies...
+flutter : Note: vector_math 
+is pinned to version 2.2.0 
+by flutter from the flutter 
+SDK.
+At line:1 char:1
++ flutter pub get 2>&1 | 
+Out-File -FilePath 
+pub_out.txt -Encoding utf8; 
+...
++ ~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo           
+   : NotSpecified: (Note: v  
+  ector_ma...he flutter SD   
+ K.:String) [], RemoteExc    
+eption
+    + FullyQualifiedErrorId  
+   : NativeCommandError
+ 
+See https://dart.dev/go/sdk-v
+ersion-pinning for details.
+
+
+Because every version of 
+flutter from sdk depends on 
+vector_math 2.2.0 which 
+doesn't match any versions, 
+flutter from sdk is 
+forbidden.
+So, because incoin depends 
+on flutter from sdk, version 
+solving failed.
+Failed to update packages.
