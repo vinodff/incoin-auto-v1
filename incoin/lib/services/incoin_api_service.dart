@@ -132,8 +132,8 @@ class IncoinApiService {
             .timeout(const Duration(seconds: 8));
       }
       return jsonDecode(resp.body) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
+    } catch (e) {
+      return {'success': false, 'code': -1, 'msg': 'Network/Http Error: $e'};
     }
   }
 
@@ -241,6 +241,7 @@ class IncoinApiService {
     required String appKey,
     required String appSecret,
     required String token,
+    String? preferredToolName,
   }) async {
     final res = await apiRequest(
       '/api/tool/mylist',
@@ -250,14 +251,33 @@ class IncoinApiService {
       token: token,
       method: 'GET',
     );
-    if (res == null || res['success'] != true) {
-      return (tool: null, error: 'Failed to fetch payment tools.');
+    final code = res?['code'];
+    final isSuccess = (code == 0 || code == '000000' || code == '0');
+    if (res == null || !isSuccess) {
+      return (tool: null, error: res?['msg']?.toString() ?? 'Failed to fetch payment tools.');
     }
-    final tools = res['data'] as List?;
+    final tools = (res['data'] as List?);
     if (tools == null || tools.isEmpty) {
       return (tool: null, error: 'No payment tools found on account.');
     }
-    // Prefer Freecharge
+    
+    // First try to match the preferred tool if provided
+    if (preferredToolName != null && preferredToolName.isNotEmpty) {
+      final query = preferredToolName.toLowerCase();
+      // If the user selected "Any", don't filter. Let it fall back to Freecharge or the first available.
+      if (query != 'any') {
+        for (final t in tools) {
+          if (t is Map<String, dynamic>) {
+            final tName = (t['toolName'] as String? ?? '').toLowerCase();
+            if (tName.contains(query)) {
+              return (tool: t, error: null);
+            }
+          }
+        }
+      }
+    }
+
+    // Default: Prefer Freecharge if no matching preferred tool was found
     for (final t in tools) {
       if (t is Map<String, dynamic> &&
           (t['toolName'] as String? ?? '').toLowerCase() == 'freecharge') {
@@ -267,22 +287,32 @@ class IncoinApiService {
     return (tool: tools[0] as Map<String, dynamic>, error: null);
   }
 
-  // ── Fetch order list ─────────────────────────────────────────────
+  // ── Fetch task list ─────────────────────────────────────────────
 
-  static Future<List<Map<String, dynamic>>> fetchOrderList({
+  static Future<({List<Map<String, dynamic>> tasks, String? error})> fetchTaskList({
     required String appKey,
     required String appSecret,
     required String token,
+    double? minAmount,
+    double? maxAmount,
   }) async {
+    // NOTE: Do NOT pass minAmount/maxAmount to the server-side filter.
+    // The API's server-side filter returns stale/old orders for certain ranges.
+    // Instead, fetch ALL available orders and filter client-side (like the Python script).
     final res = await apiRequest(
       '/api/order/grablist',
-      bodyParams: {'page': 1, 'size': 30, 'data': {}},
+      bodyParams: {'page': 1, 'size': 50, 'data': {}},
       appKey: appKey,
       appSecret: appSecret,
       token: token,
       method: 'POST',
     );
-    if (res == null || res['success'] != true) return [];
+    if (res == null) return (tasks: <Map<String, dynamic>>[], error: 'Connection failed or timeout');
+    final code = res['code'];
+    final isSuccess = (code == 0 || code == '000000' || code == '0');
+    if (!isSuccess) {
+      return (tasks: <Map<String, dynamic>>[], error: res['msg']?.toString() ?? res.toString());
+    }
     final data = res['data'];
     List records = [];
     if (data is List) {
@@ -290,45 +320,47 @@ class IncoinApiService {
     } else if (data is Map && data.containsKey('records')) {
       records = data['records'] as List? ?? [];
     }
-    return records
-        .whereType<Map<String, dynamic>>()
-        .toList();
+    return (
+      tasks: records.whereType<Map<String, dynamic>>().toList(),
+      error: null
+    );
   }
 
-  // ── Grab a single order ──────────────────────────────────────────
+  // ── Initialize a single task ──────────────────────────────────────────
 
-  static Future<Map<String, dynamic>?> grabOrder({
-    required String orderId,
+  static Future<Map<String, dynamic>?> initializeTask({
+    required String taskId,
     required Map<String, dynamic> selectedTool,
     required String appKey,
     required String appSecret,
     required String token,
   }) async {
-    return apiRequest(
+    final res = await apiRequest(
       '/api/order/grab',
       bodyParams: {
-        'orderId':  orderId,
+        'orderId':  taskId,
         'toolType': selectedTool['toolType'],
-        'upiAddr':  selectedTool['upiAddr'],
+        'upiAddr':  selectedTool['upiAddr'] ?? selectedTool['account'] ?? selectedTool['toolAccount'],
       },
       appKey: appKey,
       appSecret: appSecret,
       token: token,
       method: 'POST',
     );
+    return res;
   }
 
-  // ── Confirm an order ─────────────────────────────────────────────
+  // ── Verify a task ─────────────────────────────────────────────
 
-  static Future<Map<String, dynamic>?> confirmOrder({
-    required String orderId,
+  static Future<Map<String, dynamic>?> verifyTask({
+    required String taskId,
     required String appKey,
     required String appSecret,
     required String token,
   }) async {
     return apiRequest(
       '/api/order/machine/review',
-      bodyParams: {'orderId': orderId},
+      bodyParams: {'orderId': taskId},
       appKey: appKey,
       appSecret: appSecret,
       token: token,

@@ -65,7 +65,7 @@ class SupabaseService {
   }
 
   // Logs
-  Stream<List<Map<String, dynamic>>> get orderLogsStream {
+  Stream<List<Map<String, dynamic>>> get taskLogsStream {
     if (!isAuthenticated) return Stream.value([]);
     return _supabase
         .from('order_logs')
@@ -74,7 +74,7 @@ class SupabaseService {
         .order('created_at');
   }
 
-  Stream<int> get totalOrdersStream {
+  Stream<int> get totalTasksStream {
     if (!isAuthenticated) return Stream.value(0);
     return _supabase
         .from('order_logs')
@@ -88,21 +88,21 @@ class SupabaseService {
               return sum + (count is int ? count : int.tryParse(count.toString()) ?? 0);
             });
           } catch (e) {
-            debugPrint('Error mapping totalOrdersStream: $e');
+            debugPrint('Error mapping totalTasksStream: $e');
             return 0;
           }
         });
   }
 
-  Future<void> addOrderLog({
-    required int ordersCount,
+  Future<void> addTaskLog({
+    required int tasksCount,
     required int creditsUsed,
   }) async {
     if (!isAuthenticated) return;
     
     // Call the RPC for atomic deduction and logging
     await _supabase.rpc('record_order_grab', params: {
-      'p_orders_count': ordersCount,
+      'p_orders_count': tasksCount,
       'p_credits_used': creditsUsed,
     });
   }

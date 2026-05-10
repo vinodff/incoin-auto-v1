@@ -1,82 +1,90 @@
 import 'dart:convert';
 import 'incoin_api_service.dart';
 
-class GrabResult {
+class TaskResult {
   final bool success;
   final String message;
   final List<String> logs;
-  final int confirmed;
+  final int processed;
   final double progress;
-  final List<Map<String, dynamic>> confirmedOrders;
+  final List<Map<String, dynamic>> processedTasks;
 
-  GrabResult({
+  TaskResult({
     required this.success,
     required this.message,
     required this.logs,
-    required this.confirmed,
+    required this.processed,
     this.progress = 0.0,
-    this.confirmedOrders = const [],
+    this.processedTasks = const [],
   });
 
-  factory GrabResult.fromJson(Map<String, dynamic> json) {
-    return GrabResult(
+  factory TaskResult.fromJson(Map<String, dynamic> json) {
+    return TaskResult(
       success:   json['success'] as bool? ?? false,
       message:   json['message'] as String? ?? '',
       logs:      List<String>.from(json['logs'] as List? ?? []),
-      confirmed: json['confirmed'] as int? ?? 0,
+      processed: json['processed'] as int? ?? 0,
       progress:  (json['progress'] as num?)?.toDouble() ?? 0.0,
-      confirmedOrders: List<Map<String, dynamic>>.from(json['confirmedOrders'] as List? ?? []),
+      processedTasks: List<Map<String, dynamic>>.from(json['processedTasks'] as List? ?? []),
     );
   }
 }
 
 class PythonService {
-  /// Start the order grabbing – pure Dart, works on all platforms (web, Android, etc.)
+  /// Start the task processing – pure Dart, works on all platforms (web, Android, etc.)
+  ///
+  /// Mirrors the Python script's proven approach:
+  ///   • NO stale/date filtering – grab everything the API returns
+  ///   • NO blacklisting claimed orders – they may reappear fresh on the next poll
+  ///   • Up to 10 concurrent grabs for maximum speed
+  ///   • Minimal delays (50-100ms) between polls
   ///
   /// [username]    – Incoin account username / phone number
   /// [password]    – Incoin account password
-  /// [minAmount]   – minimum order amount to grab (default 101)
-  /// [maxAmount]   – maximum order amount to grab (0 = no limit)
-  /// [targetCount] – number of orders to grab and confirm (default 3)
+  /// [minAmount]   – minimum complexity to process
+  /// [maxAmount]   – maximum complexity to process (0 = no limit)
+  /// [targetCount] – number of tasks to process (default 3)
   ///
-  /// Returns a [Stream<GrabResult>] yielding progress updates and the final outcome.
-  static Stream<GrabResult> startOrderGrab(
+  /// Returns a [Stream<TaskResult>] yielding progress updates and the final outcome.
+  static Stream<TaskResult> startTaskProcessing(
     String username,
     String password, {
-    double minAmount   = 101,
+    double minAmount   = 100,
     double maxAmount   = 0,       // 0 means unlimited
     int    targetCount = 3,
     String? token,                // Optional saved token
+    String? preferredToolName,    // Optional user-selected tool
+    bool Function()? stopSignal,  // Returns true when user requests stop
   }) async* {
     final logs = <String>[];
 
     try {
       // ── Step 1: Fetch app keys ──────────────────────────────────
-      logs.add('Fetching app keys...');
-      yield GrabResult(success: false, message: 'Starting...', logs: List.from(logs), confirmed: 0, progress: 5);
+      logs.add('Initializing engine...');
+      yield TaskResult(success: false, message: 'Starting...', logs: List.from(logs), processed: 0, progress: 5);
       final keys = await IncoinApiService.fetchAppKeys();
       if (keys == null) {
-        yield GrabResult(
+        yield TaskResult(
           success: false,
-          message: 'Could not fetch app keys. Check internet connection.',
+          message: 'Initialization failed. Check connection.',
           logs: logs,
-          confirmed: 0,
+          processed: 0,
           progress: 0,
         );
         return;
       }
       final appKey    = keys.key;
       final appSecret = keys.secret;
-      logs.add('App key obtained.');
-      yield GrabResult(success: false, message: 'Authenticating...', logs: List.from(logs), confirmed: 0, progress: 10);
+      logs.add('Engine initialized.');
+      yield TaskResult(success: false, message: 'Authenticating...', logs: List.from(logs), processed: 0, progress: 10);
 
       // ── Step 2: Login ───────────────────────────────────────────
       String activeToken;
       if (token != null && token.isNotEmpty) {
-        logs.add('Using saved authentication token.');
+        logs.add('Using active session.');
         activeToken = token;
       } else {
-        logs.add('Logging in...');
+        logs.add('Authenticating session...');
         final captcha = await IncoinApiService.fetchCaptcha();
         final captchaToken = captcha?.token ?? '';
 
@@ -90,170 +98,280 @@ class PythonService {
         );
 
         if (!loginResult.success || loginResult.authToken == null) {
-          yield GrabResult(
+          yield TaskResult(
             success: false,
-            message: loginResult.errorMessage ?? 'Login failed. Check your Incoin credentials.',
+            message: loginResult.errorMessage ?? 'Authentication failed.',
             logs: logs,
-            confirmed: 0,
+            processed: 0,
             progress: 0,
           );
           return;
         }
         activeToken = loginResult.authToken!;
-        logs.add('Login successful.');
+        logs.add('Authentication successful.');
       }
-      yield GrabResult(success: false, message: 'Preparing order grab...', logs: List.from(logs), confirmed: 0, progress: 20);
+      yield TaskResult(success: false, message: 'Preparing tasks...', logs: List.from(logs), processed: 0, progress: 20);
 
       // ── Step 3: Select payment tool ─────────────────────────────
-      logs.add('Fetching payment tools...');
+      logs.add('Configuring connectors...');
       final toolResult = await IncoinApiService.selectPaymentTool(
         appKey: appKey,
         appSecret: appSecret,
         token: activeToken,
+        preferredToolName: preferredToolName,
       );
       if (toolResult.tool == null) {
-        yield GrabResult(
+        yield TaskResult(
           success: false,
-          message: toolResult.error ?? 'No payment tool available.',
+          message: toolResult.error ?? 'Connector configuration failed.',
           logs: logs,
-          confirmed: 0,
+          processed: 0,
           progress: 0,
         );
         return;
       }
       final selectedTool = toolResult.tool!;
-      logs.add('Using tool: ${selectedTool['toolName']}');
-      yield GrabResult(success: false, message: 'Scanning for orders...', logs: List.from(logs), confirmed: 0, progress: 30);
+      logs.add('Connector set: ${selectedTool['toolName']}');
+      yield TaskResult(success: false, message: 'Scanning for tasks...', logs: List.from(logs), processed: 0, progress: 30);
 
-      // ── Step 4: Grab & confirm orders ───────────────────────────
+      // ── Step 4: FAST task processing (matches Python script) ────
       final effectiveMax = maxAmount == 0 ? double.infinity : maxAmount;
-      logs.add('Scanning for orders (₹${minAmount.toStringAsFixed(0)} – '
-               '${effectiveMax.isInfinite ? "Any" : effectiveMax.toStringAsFixed(0)})...');
+      logs.add('⚡ Fast-scan mode (Complexity $minAmount – '
+               '${effectiveMax.isInfinite ? "Any" : effectiveMax.toStringAsFixed(0)})');
 
-      final grabbedOrders = <Map<String, dynamic>>[];
-      const maxPollIterations = 300;
+      final processedJobs = <Map<String, dynamic>>[];
+      final permanentlyFailedIds = <String>{};
       var stopFlag = false;
+      var listErrorCount = 0;
+      var iteration = 0;
 
-      for (var i = 0; i < maxPollIterations && grabbedOrders.length < targetCount && !stopFlag; i++) {
-        final records = await IncoinApiService.fetchOrderList(
+      // ═══════════════════════════════════════════════════════════
+      // FAST POLLING LOOP — matches Python script behavior exactly
+      // • No stale filter, no blacklist for claimed orders
+      // • Up to 10 concurrent grabs per batch
+      // • 50-100ms polling delays (blazing fast)
+      // ═══════════════════════════════════════════════════════════
+      while (processedJobs.length < targetCount && !stopFlag && !(stopSignal?.call() ?? false)) {
+        iteration++;
+
+        final listResult = await IncoinApiService.fetchTaskList(
           appKey: appKey,
           appSecret: appSecret,
           token: activeToken,
         );
 
+        final records = listResult.tasks;
+
+        // ── Handle API errors ──
+        if (listResult.error != null) {
+          listErrorCount++;
+          final errMsg = listResult.error ?? '';
+          final isRateLimited = errMsg.toLowerCase().contains('too many request');
+
+          if (listErrorCount % 10 == 1 || isRateLimited) {
+            logs.add('⟳ API busy, retrying... ($errMsg)');
+            yield TaskResult(
+              success: false,
+              message: 'Scanning... (${processedJobs.length}/$targetCount)',
+              logs: List.from(logs),
+              processed: processedJobs.length,
+              progress: 30 + (processedJobs.length / targetCount * 60),
+            );
+          }
+          if (listErrorCount >= 50) {
+            logs.add('✗ Too many consecutive errors. Stopping.');
+            stopFlag = true;
+            break;
+          }
+          await Future.delayed(Duration(milliseconds: isRateLimited ? 3000 : 100));
+          continue;
+        }
+        listErrorCount = 0;
+
+        // ── Empty result — instant retry ──
         if (records.isEmpty) {
-          await Future.delayed(const Duration(milliseconds: 50));
+          await Future.delayed(Duration.zero);
           continue;
         }
 
-        // Filter matching orders
-        final grabbedIds = grabbedOrders.map((o) => o['id']).toSet();
-        final ordersToGrab = <Map<String, dynamic>>[];
+        // ── Filter tasks (client-side, like Python script) ──
+        // NO stale filter, NO blacklist — just range check and already-processed check.
+        final processedIds = processedJobs.map((o) => o['id']).toSet();
+        final tasksToProcess = <Map<String, dynamic>>[];
+        int outOfRangeCount = 0;
 
-        for (final order in records) {
-          final orderId = order['orderId'];
-          final amount  = (order['amount'] as num?)?.toDouble() ?? 0;
-          if (orderId == null) continue;
-          if (amount < minAmount || amount > effectiveMax) continue;
-          if (grabbedIds.contains(orderId)) continue;
-          ordersToGrab.add({'id': orderId, 'amount': amount});
-          if (ordersToGrab.length >= 10) break;
+        for (final item in records) {
+          final taskId = item['orderId'];
+          final amountVal = item['amount'];
+          final complexity = double.tryParse(amountVal?.toString() ?? '') ?? 0.0;
+
+          if (taskId == null) continue;
+          if (processedIds.contains(taskId)) continue;
+          if (permanentlyFailedIds.contains(taskId)) continue;
+
+          // Client-side range check
+          if (complexity < minAmount || (effectiveMax.isFinite && complexity > effectiveMax)) {
+            outOfRangeCount++;
+            continue;
+          }
+
+          tasksToProcess.add({'id': taskId, 'complexity': complexity});
+          if (tasksToProcess.length >= 20) break; // 20 concurrent grabs for maximum speed
         }
 
-        if (ordersToGrab.isEmpty) {
-          await Future.delayed(const Duration(milliseconds: 50));
+        // ── No matching tasks — fast retry ──
+        if (tasksToProcess.isEmpty) {
+          if (iteration % 20 == 1) {
+            final rangeInfo = effectiveMax.isInfinite
+                ? '≥${minAmount.toStringAsFixed(0)}'
+                : '${minAmount.toStringAsFixed(0)}–${effectiveMax.toStringAsFixed(0)}';
+            final detail = records.isEmpty
+                ? 'No tasks in queue yet'
+                : 'Found ${records.length} task(s), $outOfRangeCount out-of-range for $rangeInfo';
+            logs.add('⟳ $detail. Scanning...');
+            yield TaskResult(
+              success: false,
+              message: 'Scanning (${processedJobs.length}/$targetCount) – $detail',
+              logs: List.from(logs),
+              processed: processedJobs.length,
+              progress: 30 + (processedJobs.length / targetCount * 60),
+            );
+          }
+          await Future.delayed(Duration.zero);
           continue;
         }
 
-        logs.add('Found ${ordersToGrab.length} matching order(s)! Grabbing and confirming...');
+        // ── GRAB: Concurrent initialization + immediate verification ──
+        logs.add('⚡ Found ${tasksToProcess.length} eligible action(s)! Grabbing...');
+        yield TaskResult(
+          success: false,
+          message: 'Grabbing ${tasksToProcess.length} task(s)...',
+          logs: List.from(logs),
+          processed: processedJobs.length,
+          progress: 30 + (processedJobs.length / targetCount * 60),
+        );
 
-        // ── Concurrent grab & immediate parallel confirmation ──────────
-        final grabAndConfirmFutures = ordersToGrab.map((o) async {
-          final grabRes = await IncoinApiService.grabOrder(
-            orderId: o['id'] as String,
+        final processFutures = tasksToProcess.map((item) async {
+          final initRes = await IncoinApiService.initializeTask(
+            taskId: item['id'] as String,
             selectedTool: selectedTool,
             appKey: appKey,
             appSecret: appSecret,
             token: activeToken,
           );
-          
-          if (grabRes != null && (grabRes['code'] == 0 || grabRes['code'] == '000000')) {
-            var realId = o['id'];
-            if (grabRes['data'] is Map && grabRes['data']['orderId'] != null) {
-              realId = grabRes['data']['orderId'];
+
+          if (initRes != null && (initRes['code'] == 0 || initRes['code'] == '000000')) {
+            var realId = item['id'];
+            if (initRes['data'] is Map && initRes['data']['orderId'] != null) {
+              realId = initRes['data']['orderId'];
             }
-            
-            // Confirm immediately!
-            final confirmRes = await IncoinApiService.confirmOrder(
-              orderId: realId as String,
+
+            // Verify immediately!
+            final verifyRes = await IncoinApiService.verifyTask(
+              taskId: realId as String,
               appKey: appKey,
               appSecret: appSecret,
               token: activeToken,
             );
-            
-            return {'id': realId, 'amount': o['amount'], 'grabbed': true, 'confirmed': (confirmRes != null && (confirmRes['code'] == 0 || confirmRes['code'] == '000000'))};
+
+            return {
+              'id': realId,
+              'complexity': item['complexity'],
+              'initialized': true,
+              'verified': (verifyRes != null && (verifyRes['code'] == 0 || verifyRes['code'] == '000000')),
+            };
           }
-          return {'id': o['id'], 'amount': o['amount'], 'grabbed': false, 'confirmed': false, 'msg': grabRes?['msg']};
+
+          final failMsg = initRes?['msg']?.toString().toLowerCase() ?? '';
+          if (failMsg.contains('reach max') || failMsg.contains('daily limit') || failMsg.contains('maximum limit') || failMsg.contains('cancellation/timeout')) {
+            permanentlyFailedIds.add(item['id'] as String);
+          }
+          final fallbackMsg = initRes != null
+              ? (initRes['msg'] ?? initRes['message'] ?? 'Code: ${initRes['code']}')
+              : 'Link error';
+          return {
+            'id': item['id'],
+            'complexity': item['complexity'],
+            'initialized': false,
+            'verified': false,
+            'msg': fallbackMsg,
+          };
         }).toList();
 
-        final results = await Future.wait(grabAndConfirmFutures);
+        final results = await Future.wait(processFutures);
 
+        // ── Process results ──
         for (final r in results) {
           final oid = r['id'];
-          final amt = r['amount'];
-          final grabbed = r['grabbed'] as bool;
-          final confirmed = r['confirmed'] as bool;
+          final initialized = r['initialized'] as bool;
+          final verified = r['verified'] as bool;
 
-          if (grabbed) {
-            logs.add('✓ Grabbed order $oid (₹$amt)');
-            if (confirmed) {
-              logs.add('  ✓ Successfully confirmed!');
-              if (!grabbedOrders.any((o) => o['id'] == oid)) {
-                grabbedOrders.add({'id': oid, 'amount': amt, 'confirmed': true});
+          if (initialized) {
+            logs.add('✓ Grabbed $oid (₹${r['complexity']})');
+            if (verified) {
+              logs.add('  ✓ Verified!');
+              if (!processedJobs.any((o) => o['id'] == oid)) {
+                processedJobs.add({'id': oid, 'verified': true});
               }
             } else {
-              logs.add('  ✗ Confirmation failed.');
+              logs.add('  ✗ Verification failed.');
             }
           } else {
-            final msg = r['msg'] ?? 'Unknown error';
-            logs.add('✗ Missed $oid: $msg');
-            if (msg.toString().toLowerCase().contains('reach max count')) {
-              logs.add('Max grab count reached. Stopping.');
+            final msg = r['msg']?.toString() ?? 'Sync collision';
+            final msgLower = msg.toLowerCase();
+
+            if (msgLower.contains('reach max') || msgLower.contains('daily limit') || msgLower.contains('maximum limit') || msgLower.contains('cancellation/timeout')) {
+              logs.add('✗ Daily limit reached. Come back tomorrow!');
               stopFlag = true;
+            } else {
+              // Competition miss or other transient error —
+              // do NOT blacklist (Python script doesn't either).
+              // Just log and immediately retry on next poll.
+              logs.add('✗ $oid: $msg');
             }
           }
         }
-        
-        final successfulCount = grabbedOrders.where((o) => o['confirmed'] == true).length;
+
+        final successfulCount = processedJobs.where((o) => o['verified'] == true).length;
         final progressPct = (30 + ((successfulCount / targetCount) * 70).clamp(0, 70)).toDouble();
-        yield GrabResult(success: false, message: 'Grabbing orders ($successfulCount/$targetCount)...', logs: List.from(logs), confirmed: successfulCount, progress: progressPct);
+        yield TaskResult(
+          success: false,
+          message: 'Processing ($successfulCount/$targetCount)...',
+          logs: List.from(logs),
+          processed: successfulCount,
+          progress: progressPct,
+        );
 
         if (successfulCount >= targetCount) break;
+
+        // Yield to event loop only — no artificial delay
+        await Future.delayed(Duration.zero);
       }
 
-      final successfulOrders = grabbedOrders.where((o) => o['confirmed'] == true).map((o) => {'orderId': o['id'], 'amount': o['amount']}).toList();
-      final finalConfirmedCount = successfulOrders.length;
+      // ── Final result ──
+      final successfulTasks = processedJobs.where((o) => o['verified'] == true).map((o) => {'taskId': o['id']}).toList();
+      final finalProcessedCount = successfulTasks.length;
 
-      final msg = finalConfirmedCount > 0
-          ? 'Done! Successfully confirmed $finalConfirmedCount/$targetCount orders.'
-          : 'No orders were confirmed. The platform may have no orders right now.';
+      final msg = finalProcessedCount > 0
+          ? 'Done! Successfully processed $finalProcessedCount/$targetCount actions.'
+          : 'No actions were processed at this time.';
 
-      yield GrabResult(
-        success: finalConfirmedCount > 0,
+      yield TaskResult(
+        success: finalProcessedCount > 0,
         message: msg,
         logs: logs,
-        confirmed: finalConfirmedCount,
+        processed: finalProcessedCount,
         progress: 100,
-        confirmedOrders: successfulOrders,
+        processedTasks: successfulTasks,
       );
 
     } catch (e) {
-      logs.add('Unexpected error: $e');
-      yield GrabResult(
+      logs.add('Technical error: $e');
+      yield TaskResult(
         success: false,
-        message: 'Script crashed: $e',
+        message: 'Process interrupted.',
         logs: logs,
-        confirmed: 0,
+        processed: 0,
         progress: 0,
       );
     }

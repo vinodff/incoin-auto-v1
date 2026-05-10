@@ -47,7 +47,7 @@ class _SplashScreenState extends State<SplashScreen> {
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Update Available'),
-          content: const Text('Please download the latest version of the app to continue using Incoin Auto.'),
+          content: const Text('Please download the latest version of the app to continue using Incoin Assistant.'),
           actions: [
             ElevatedButton(
               onPressed: () async {
@@ -95,7 +95,7 @@ class _SplashScreenState extends State<SplashScreen> {
             ),
             const SizedBox(height: 32),
             const Text(
-              'Incoin Auto',
+              'Incoin Assistant',
               style: TextStyle(
                 fontSize: 36,
                 fontWeight: FontWeight.bold,
@@ -105,7 +105,7 @@ class _SplashScreenState extends State<SplashScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Automate your earnings',
+              'Enhance your workflow',
               style: TextStyle(
                 fontSize: 16,
                 color: Colors.white.withOpacity(0.8),

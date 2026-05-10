@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../services/python_service.dart';
 import '../services/supabase_service.dart';
+import '../widgets/referral_bottom_sheet.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -14,22 +15,127 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _storage = const FlutterSecureStorage();
   final SupabaseService _supabaseService = SupabaseService();
 
-  bool _isGrabbing = false;
-  double _grabProgress = 0.0;
-  String _grabStatusLine = "";
+  bool _isProcessing = false;
+  bool _stopRequested = false;
+  double _processProgress = 0.0;
+  String _processStatusLine = "";
+  List<String> _currentLogs = [];
 
   // ── Settings (can be exposed to a settings screen later) ──
-  double _minAmount   = 101;
-  double _maxAmount   = 0;       // 0 = no limit
+  double _minComplexity = 100;
+  double _maxComplexity = 0;       // 0 = no limit
   int    _targetCount = 3;
+  String _preferredToolName = 'Freecharge';
 
-  // ── Quick stats (update after each grab run) ──
-  // No longer needed, using StreamBuilder
+  static bool _hasShownReferralPopup = false;
 
-  // ─────────────────────────────────────────────
-  // Grab logic
-  // ─────────────────────────────────────────────
-  void _startOrderGrab() async {
+  @override
+  void initState() {
+    super.initState();
+    _checkReferralEligibility();
+  }
+
+  Future<void> _checkReferralEligibility() async {
+    if (_hasShownReferralPopup) return;
+    
+    // Check if the user has already applied for free credits
+    final hasApplied = await _supabaseService.checkReferralApplicationStatus();
+    if (hasApplied || !mounted) return;
+
+    _hasShownReferralPopup = true;
+
+    // Show the dialog after build phase
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _showWelcomeReferralPopup();
+      }
+    });
+  }
+
+  void _showWelcomeReferralPopup() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          contentPadding: const EdgeInsets.all(24),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.purple.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.card_giftcard, color: Colors.purple, size: 48),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Welcome to Incoin Assistant!',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Share the app with your friends and get 50 FREE feature credits to enhance your workflow!',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    _openReferralBottomSheet();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: const Text(
+                    'Claim 50 Free Credits Now',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Maybe Later', style: TextStyle(color: Colors.grey)),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _openReferralBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const ReferralBottomSheet(),
+    );
+  }
+
+  // ── Task logic ──
+  void _startTaskProcessing() async {
     final username = await _storage.read(key: 'incoin_username');
     final password = await _storage.read(key: 'incoin_password');
     final token = await _storage.read(key: 'incoin_token');
@@ -39,7 +145,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (username == null || password == null || username.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please connect your Incoin account first.'),
+          content: Text('Please connect your service workspace first.'),
         ),
       );
       Navigator.of(context).pushNamed('/connect_incoin');
@@ -53,40 +159,49 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Insufficient credits! Please buy credits to continue.'),
+            content: Text('Insufficient tool credits! Please top up to continue.'),
             backgroundColor: Colors.red,
           ),
         );
         return;
       }
     } catch (e) {
-      // If we can't fetch credits, we'll assume 0 for safety or handle error
       debugPrint('Error checking credits: $e');
     }
 
     setState(() {
-      _isGrabbing = true;
-      _grabProgress = 0.0;
-      _grabStatusLine = "Starting...";
+      _isProcessing = true;
+      _stopRequested = false;
+      _processProgress = 0.0;
+      _processStatusLine = "Initializing...";
+      _currentLogs = [];
     });
 
     try {
-      final stream = PythonService.startOrderGrab(
+      final stream = PythonService.startTaskProcessing(
         username,
         password,
-        minAmount:   _minAmount,
-        maxAmount:   _maxAmount,
+        minAmount:   _minComplexity,
+        maxAmount:   _maxComplexity,
         targetCount: _targetCount,
         token:       token,
+        preferredToolName: _preferredToolName,
+        stopSignal: () => _stopRequested,
       );
 
-      GrabResult? finalResult;
+      TaskResult? finalResult;
 
       await for (final result in stream) {
         if (!mounted) return;
+        if (_stopRequested) break;
+        // Surface the latest log line (especially errors) as the live message
+        final lastLog = result.logs.isNotEmpty ? result.logs.last : null;
+        final isError = lastLog != null &&
+            (lastLog.startsWith('✗') || lastLog.toLowerCase().contains('error') || lastLog.toLowerCase().contains('fail'));
         setState(() {
-          _grabProgress = result.progress;
-          _grabStatusLine = result.message;
+          _processProgress = result.progress;
+          _processStatusLine = isError ? lastLog! : result.message;
+          _currentLogs = result.logs;
         });
         finalResult = result;
       }
@@ -94,36 +209,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (!mounted || finalResult == null) return;
       final result = finalResult;
 
-      if (result.confirmed > 0) {
-        // Persist to Supabase - the totalOrdersStream will update the UI automatically
-        await _supabaseService.addOrderLog(
-          ordersCount: result.confirmed,
-          creditsUsed: 1, // Logic: 1 processing session uses 1 credit
+      if (result.processed > 0) {
+        await _supabaseService.addTaskLog(
+          tasksCount: result.processed,
+          creditsUsed: 1, 
         );
       }
 
-      _showResultDialog(result);
+      _showTaskResultDialog(result);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Unexpected error: $e'),
+          content: Text('Processing error: $e'),
           backgroundColor: Colors.red,
         ),
       );
     } finally {
       if (mounted) setState(() {
-        _isGrabbing = false;
-        _grabProgress = 0.0;
-        _grabStatusLine = "";
+        _isProcessing = false;
+        _processProgress = 0.0;
+        _processStatusLine = "";
       });
     }
   }
 
-  void _showResultDialog(GrabResult result) {
+  void _showTaskResultDialog(TaskResult result) {
+    final isDailyLimit = result.logs.any((l) =>
+        l.toLowerCase().contains('daily limit') ||
+        l.toLowerCase().contains('come back tomorrow') ||
+        l.toLowerCase().contains('reach max') ||
+        l.toLowerCase().contains('maximum limit'));
+
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
@@ -134,7 +254,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                result.success ? 'Success' : 'Failed',
+                result.success ? 'Process Complete' : 'Process Incomplete',
                 style: const TextStyle(fontSize: 18),
               ),
             ),
@@ -146,84 +266,111 @@ class _DashboardScreenState extends State<DashboardScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(result.message,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              if (result.success && result.confirmedOrders.isNotEmpty) ...[
-                const Text('Confirmed Orders:', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 8),
+              if (isDailyLimit) ...[
+                _buildTroubleshootStep(Icons.wifi, 'Check your internet speed'),
+                const SizedBox(height: 10),
+                _buildTroubleshootStepWithAction(
+                  Icons.hub_rounded,
+                  'Check tool connection',
+                  'Relink',
+                  () {
+                    Navigator.of(ctx).pop();
+                    Navigator.of(context).pushNamed('/connect_incoin');
+                  },
+                ),
+                const SizedBox(height: 10),
+                _buildTroubleshootStep(Icons.schedule_rounded, 'Try after some time'),
+                const SizedBox(height: 16),
                 Container(
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).scaffoldBackgroundColor,
+                    color: Colors.orange.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
+                    border: Border.all(color: Colors.orange.withOpacity(0.3)),
                   ),
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: result.confirmedOrders.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final order = result.confirmedOrders[index];
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.check_circle, color: Colors.green, size: 20),
-                        title: Text('Order ID: ${order['orderId']}'),
-                        trailing: Text(
-                          '₹${order['amount']}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.info_outline, color: Colors.orange, size: 18),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'If this message keeps appearing, your daily limit has been reached. Try again tomorrow.',
+                          style: TextStyle(fontSize: 13, color: Colors.orange),
                         ),
-                      );
-                    },
+                      ),
+                    ],
                   ),
                 ),
-              ] else if (result.logs.isNotEmpty) ...[
-                const Text('Log:', style: TextStyle(color: Colors.grey)),
-                const SizedBox(height: 6),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 220),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: result.logs
-                          .map((l) => Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 1),
-                                child: Text(l,
-                                    style: const TextStyle(fontSize: 12)),
-                              ))
-                          .toList(),
+              ] else ...[
+                Text(
+                  !result.success && result.logs.isNotEmpty
+                      ? (result.logs.lastWhere(
+                          (l) => l.startsWith('✗') || l.toLowerCase().contains('fail'),
+                          orElse: () => result.message,
+                        ))
+                      : result.message,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: result.success ? null : Colors.redAccent,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                if (result.success && result.processedTasks.isNotEmpty) ...[
+                  const Text('Processed Tasks:', style: TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).scaffoldBackgroundColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.2)),
+                    ),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: result.processedTasks.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final task = result.processedTasks[index];
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                          title: Text('Task ID: ${task['taskId']}'),
+                          trailing: const Text(
+                            'Successful',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                ),
+                ],
               ],
             ],
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Dismiss'),
           ),
         ],
       ),
     );
   }
 
-  // ─────────────────────────────────────────────
-  // Settings dialog
-  // ─────────────────────────────────────────────
   void _showSettingsDialog() {
-    final minCtrl = TextEditingController(text: _minAmount.toStringAsFixed(0));
+    final minCtrl = TextEditingController(text: _minComplexity.toStringAsFixed(0));
     final maxCtrl = TextEditingController(
-        text: _maxAmount == 0 ? '' : _maxAmount.toStringAsFixed(0));
+        text: _maxComplexity == 0 ? '' : _maxComplexity.toStringAsFixed(0));
     final cntCtrl = TextEditingController(text: '$_targetCount');
+    String localPreferredTool = _preferredToolName;
 
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Grab Settings'),
+        title: const Text('Workflow Settings'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -231,7 +378,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               controller: minCtrl,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Min Amount (₹)',
+                labelText: 'Min Complexity',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -240,7 +387,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               controller: maxCtrl,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Max Amount (₹, blank = no limit)',
+                labelText: 'Max Complexity (blank = any)',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -249,9 +396,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
               controller: cntCtrl,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Orders per Run',
+                labelText: 'Tasks per Run',
                 border: OutlineInputBorder(),
               ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: localPreferredTool,
+              decoration: const InputDecoration(
+                labelText: 'Preferred Connector',
+                border: OutlineInputBorder(),
+              ),
+              items: ['Freecharge', 'Mobikwik', 'Amazon pay', 'Any'].map((t) {
+                return DropdownMenuItem(value: t, child: Text(t));
+              }).toList(),
+              onChanged: (val) {
+                if (val != null) localPreferredTool = val;
+              },
             ),
           ],
         ),
@@ -263,22 +424,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ElevatedButton(
             onPressed: () {
               setState(() {
-                _minAmount   = double.tryParse(minCtrl.text) ?? _minAmount;
-                _maxAmount   = double.tryParse(maxCtrl.text) ?? 0;
+                _minComplexity   = double.tryParse(minCtrl.text) ?? _minComplexity;
+                _maxComplexity   = double.tryParse(maxCtrl.text) ?? 0;
                 _targetCount = int.tryParse(cntCtrl.text) ?? _targetCount;
+                _preferredToolName = localPreferredTool;
               });
               Navigator.of(context).pop();
             },
-            child: const Text('Save'),
+            child: const Text('Apply'),
           ),
         ],
       ),
     );
   }
 
-  // ─────────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -289,7 +448,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: Text(
-          'Incoin Auto',
+          'Incoin Assistant',
           style: TextStyle(
             fontWeight: FontWeight.w800,
             letterSpacing: -0.5,
@@ -298,13 +457,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.settings_outlined, color: isDark ? Colors.white : Colors.black87),
-            tooltip: 'Grab Settings',
+            icon: Icon(Icons.settings_outlined,
+                color: isDark ? Colors.white : Colors.black87),
+            tooltip: 'Workflow Settings',
             onPressed: _showSettingsDialog,
+          ),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.info_outline_rounded,
+                color: isDark ? Colors.white : Colors.black87),
+            tooltip: 'Info',
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            onSelected: (route) => Navigator.of(context).pushNamed(route),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: '/about',
+                  child: Row(children: [Text('ℹ️  '), Text('About')])),
+              PopupMenuItem(value: '/contact',
+                  child: Row(children: [Text('📧  '), Text('Contact Us')])),
+              PopupMenuDivider(),
+              PopupMenuItem(value: '/terms',
+                  child: Row(children: [Text('📄  '), Text('Terms & Conditions')])),
+              PopupMenuItem(value: '/privacy',
+                  child: Row(children: [Text('🔒  '), Text('Privacy Policy')])),
+              PopupMenuItem(value: '/refund',
+                  child: Row(children: [Text('💳  '), Text('Refund Policy')])),
+            ],
           ),
           IconButton(
             icon: Icon(Icons.logout, color: isDark ? Colors.white : Colors.black87),
-            tooltip: 'Logout',
+            tooltip: 'Sign Out',
             onPressed: () => Navigator.of(context).pushReplacementNamed('/login'),
           ),
         ],
@@ -327,7 +507,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 // Welcome
                 const Text(
-                  'Welcome back 👋',
+                  'Work securely 👋',
                   style: TextStyle(
                     fontSize: 32,
                     fontWeight: FontWeight.w900,
@@ -347,9 +527,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Icon(Icons.tune_rounded, size: 16, color: isDark ? Colors.white70 : Colors.black54),
                       const SizedBox(width: 8),
                       Text(
-                        '₹${_minAmount.toStringAsFixed(0)}'
-                        ' – ${_maxAmount == 0 ? "Any amount" : "₹${_maxAmount.toStringAsFixed(0)}"}'
-                        '  •  $_targetCount/run',
+                        'Complexity: ${_minComplexity.toStringAsFixed(0)}'
+                        ' – ${_maxComplexity == 0 ? "Any" : _maxComplexity.toStringAsFixed(0)}'
+                        '  •  $_targetCount tasks/run',
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 13,
@@ -377,7 +557,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             context,
                             title: 'Credits',
                             value: '$credits',
-                            icon: Icons.monetization_on_rounded,
+                            icon: Icons.auto_fix_high_rounded,
                             color: const Color(0xFFFFA000),
                           );
                         }
@@ -386,14 +566,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     const SizedBox(width: 16),
                     Expanded(
                       child: StreamBuilder<int>(
-                        stream: _supabaseService.totalOrdersStream,
+                        stream: _supabaseService.totalTasksStream,
                         builder: (context, snapshot) {
                           final total = snapshot.data ?? 0;
                           return _buildStatCard(
                             context,
-                            title: 'Confirmed',
+                            title: 'Daily Tasks',
                             value: '$total',
-                            icon: Icons.check_circle_rounded,
+                            icon: Icons.assignment_turned_in_rounded,
                             color: const Color(0xFF00C853),
                           );
                         }
@@ -406,31 +586,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 // Action buttons
                 _buildActionButton(
                   context,
-                  title: _isGrabbing ? 'Processing… ${_grabProgress.toStringAsFixed(0)}%' : 'Start Order Grab',
-                  subtitle: _isGrabbing
-                      ? (_grabStatusLine.isNotEmpty ? _grabStatusLine : 'Auto-grab currently running')
-                      : 'Auto-grab & confirm $_targetCount orders',
-                  icon: _isGrabbing ? Icons.sync_rounded : Icons.rocket_launch_rounded,
-                  color: const Color(0xFF6200EA),     // Deep purple for main action
+                  title: _isProcessing
+                      ? (_stopRequested ? 'Stopping...' : 'Stop Processing')
+                      : 'Start Task Processing',
+                  subtitle: _isProcessing
+                      ? 'Tap to cancel the process'
+                      : 'Run $_targetCount assisted actions',
+                  icon: _isProcessing ? Icons.stop_circle_rounded : Icons.bolt_rounded,
+                  color: _isProcessing ? const Color(0xFFD32F2F) : const Color(0xFF6200EA),
                   isPrimary: true,
-                  isLoading: _isGrabbing,
-                  progress: _grabProgress,
-                  onTap: _isGrabbing ? null : _startOrderGrab,
+                  isLoading: _isProcessing,
+                  progress: _processProgress,
+                  onTap: _isProcessing
+                      ? () => setState(() => _stopRequested = true)
+                      : _startTaskProcessing,
                 ),
+                if (_isProcessing) ...[
+                  const SizedBox(height: 16),
+                  _buildCreativeLoadingWidget(),
+                ],
                 const SizedBox(height: 16),
                 _buildActionButton(
                   context,
-                  title: 'Buy Credits',
-                  subtitle: 'Get more via Razorpay',
-                  icon: Icons.shopping_bag_rounded,
+                  title: 'Top Up Credits',
+                  subtitle: 'Enable utility features',
+                  icon: Icons.account_balance_wallet_rounded,
                   color: const Color(0xFF2979FF),
                   onTap: () => Navigator.of(context).pushNamed('/buy_credits'),
                 ),
                 const SizedBox(height: 16),
                 _buildActionButton(
                   context,
-                  title: 'History',
-                  subtitle: 'View your order confirmation logs',
+                  title: 'Activity History',
+                  subtitle: 'View task processing logs',
                   icon: Icons.history_rounded,
                   color: const Color(0xFF00BFA5),
                   onTap: () => Navigator.of(context).pushNamed('/order_logs'),
@@ -438,9 +626,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 16),
                 _buildActionButton(
                   context,
-                  title: 'Connect Incoin',
-                  subtitle: 'Update your Incoin credentials',
-                  icon: Icons.link_rounded,
+                  title: 'Workspace Link',
+                  subtitle: 'Update connection credentials',
+                  icon: Icons.hub_rounded,
                   color: const Color(0xFFFF3D00),
                   onTap: () => Navigator.of(context).pushNamed('/connect_incoin'),
                 ),
@@ -448,6 +636,90 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTroubleshootStep(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.blueAccent),
+        const SizedBox(width: 10),
+        Text(text, style: const TextStyle(fontSize: 14)),
+      ],
+    );
+  }
+
+  Widget _buildTroubleshootStepWithAction(
+      IconData icon, String text, String actionLabel, VoidCallback onTap) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: Colors.blueAccent),
+        const SizedBox(width: 10),
+        Text(text, style: const TextStyle(fontSize: 14)),
+        const SizedBox(width: 6),
+        GestureDetector(
+          onTap: onTap,
+          child: Text(
+            actionLabel,
+            style: const TextStyle(
+              fontSize: 14,
+              color: Colors.blueAccent,
+              fontWeight: FontWeight.bold,
+              decoration: TextDecoration.underline,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCreativeLoadingWidget() {
+    final isError = _processStatusLine.startsWith('✗') ||
+        _processStatusLine.toLowerCase().contains('error') ||
+        _processStatusLine.toLowerCase().contains('fail') ||
+        _processStatusLine.toLowerCase().contains('limit');
+    final color = isError ? Colors.redAccent : Colors.purpleAccent;
+
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 350),
+      child: Container(
+        key: ValueKey(_processStatusLine),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        decoration: BoxDecoration(
+          color: isError
+              ? Colors.red.withOpacity(0.08)
+              : Colors.purple.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Row(
+          children: [
+            isError
+                ? Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 20)
+                : SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: Colors.purpleAccent,
+                    ),
+                  ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                _processStatusLine.isEmpty ? 'Initializing...' : _processStatusLine,
+                style: TextStyle(
+                  color: isError ? Colors.redAccent : Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -609,3 +881,4 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 }
+

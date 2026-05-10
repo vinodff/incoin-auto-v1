@@ -11,7 +11,7 @@ class OrderLogsScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('History'),
+        title: const Text('Task History'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios),
           onPressed: () => Navigator.of(context).pop(),
@@ -37,7 +37,7 @@ class OrderLogsScreen extends StatelessWidget {
                   Expanded(
                     flex: 1,
                     child: Text(
-                      'Orders',
+                      'Tasks',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor),
                     ),
@@ -45,7 +45,7 @@ class OrderLogsScreen extends StatelessWidget {
                   Expanded(
                     flex: 1,
                     child: Text(
-                      'Credits',
+                      'Usage',
                       textAlign: TextAlign.right,
                       style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor),
                     ),
@@ -57,7 +57,7 @@ class OrderLogsScreen extends StatelessWidget {
             // List Content
             Expanded(
               child: StreamBuilder<List<Map<String, dynamic>>>(
-                stream: _supabaseService.orderLogsStream,
+                stream: _supabaseService.taskLogsStream,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -105,7 +105,7 @@ class OrderLogsScreen extends StatelessWidget {
                             ),
                           ),
                           
-                          // Orders Confirmed
+                          // Tasks Confirmed
                           Expanded(
                             flex: 1,
                             child: Row(
@@ -127,7 +127,7 @@ class OrderLogsScreen extends StatelessWidget {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
-                                const Icon(Icons.monetization_on, color: Color(0xFFFFB300), size: 16),
+                                const Icon(Icons.bolt_rounded, color: Color(0xFFFFB300), size: 16),
                                 const SizedBox(width: 4),
                                 Text(
                                   '-${log['credits_used']}',

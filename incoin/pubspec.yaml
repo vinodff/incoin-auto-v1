@@ -1,4 +1,4 @@
-name: incoin
+name: incoin_assistant
 description: "A new Flutter project."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -39,7 +39,7 @@ dependencies:
   crypto: ^3.0.5
   supabase_flutter: ^2.12.0
   intl: ^0.19.0
-  razorpay_flutter: ^1.3.7
+  cashfree_pg: ^2.0.12+32
   js: ^0.7.1
   url_launcher: ^6.3.2
   image_picker: ^1.2.1
@@ -79,6 +79,9 @@ flutter:
   assets:
     - assets/images/step1.jpg
     - assets/images/step2.jpg
+    - assets/images/step3_example1.jpg
+    - assets/images/step3_example2.jpg
+    - assets/images/step3_example3.jpg
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

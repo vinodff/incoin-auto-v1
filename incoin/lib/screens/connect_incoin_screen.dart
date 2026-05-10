@@ -120,7 +120,7 @@ class _ConnectIncoinScreenState extends State<ConnectIncoinScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content:
-                Text('Could not reach Incoin servers. Check your internet.')),
+                Text('Could not reach backend servers. Check your internet.')),
       );
       return;
     }
@@ -162,7 +162,7 @@ class _ConnectIncoinScreenState extends State<ConnectIncoinScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✅ Incoin account connected successfully!'),
+          content: Text('✅ Service account integrated successfully!'),
           backgroundColor: Colors.green,
         ),
       );
@@ -176,7 +176,7 @@ class _ConnectIncoinScreenState extends State<ConnectIncoinScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Connect Incoin'),
+        title: const Text('Service Integration'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios),
           onPressed: () => Navigator.of(context).pop(),
@@ -216,16 +216,16 @@ class _ConnectIncoinScreenState extends State<ConnectIncoinScreen> {
               // ── Fields ───────────────────────────────────────────
               CustomTextField(
                 controller: _usernameController,
-                labelText: 'Incoin Username / Phone',
-                hintText: 'Enter your Incoin login',
+                labelText: 'Account Username / ID',
+                hintText: 'Enter your service username',
                 prefixIcon: Icons.person_outline,
                 keyboardType: TextInputType.phone,
               ),
               const SizedBox(height: 20),
               CustomTextField(
                 controller: _passwordController,
-                labelText: 'Incoin Password',
-                hintText: 'Enter your Incoin password',
+                labelText: 'Account Password',
+                hintText: 'Enter your service password',
                 prefixIcon: Icons.lock_outline,
                 isPassword: true,
               ),
@@ -284,7 +284,7 @@ class _ConnectIncoinScreenState extends State<ConnectIncoinScreen> {
 
               // ── Submit button ────────────────────────────────────
               CustomButton(
-                text: 'Verify & Connect',
+                text: 'Verify & Integrate',
                 onPressed: _isLoading ? () {} : _saveAndConnect,
                 isLoading: _isLoading,
                 icon: Icons.link,

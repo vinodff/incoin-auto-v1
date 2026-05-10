@@ -10,6 +10,7 @@ import 'screens/connect_incoin_screen.dart';
 import 'screens/buy_credits_screen.dart';
 import 'screens/order_logs_screen.dart';
 import 'screens/email_verification_screen.dart';
+import 'screens/info_screens.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +47,11 @@ class MyApp extends StatelessWidget {
           final email = ModalRoute.of(context)!.settings.arguments as String? ?? '';
           return EmailVerificationScreen(email: email);
         },
+        '/about':   (context) => const AboutScreen(),
+        '/contact': (context) => const ContactScreen(),
+        '/terms':   (context) => const TermsScreen(),
+        '/privacy': (context) => const PrivacyScreen(),
+        '/refund':  (context) => const RefundScreen(),
       },
     );
   }

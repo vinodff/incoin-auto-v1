@@ -78,7 +78,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Sign in to automate your earnings',
+                'Sign in to manage your tasks efficiently',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: Theme.of(context).textTheme.bodyLarge?.color?.withOpacity(0.7),
                     ),
