@@ -73,14 +73,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.2"
-  cashfree_pg:
-    dependency: "direct main"
-    description:
-      name: cashfree_pg
-      sha256: "2224880f43f798d8d696dac064a00530394bb52e7041f64dc65708c8eba876b5"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.0.12+32"
   characters:
     dependency: transitive
     description:

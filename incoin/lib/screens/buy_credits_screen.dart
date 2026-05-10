@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../utils/cashfree_mobile.dart'
     if (dart.library.js) '../utils/cashfree_web.dart';
@@ -94,6 +95,36 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
           }
         },
       );
+
+      // On mobile (Android/iOS), the browser opens externally — show a
+      // confirmation dialog so the user can add credits after returning.
+      if (!kIsWeb && mounted) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Payment Complete?'),
+            content: const Text(
+                'Did you successfully complete the payment in the browser?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('No', style: TextStyle(color: Colors.grey)),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                child: const Text('Yes, Add Credits',
+                    style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        );
+        if (confirmed == true && mounted) {
+          await _finalizeCredits(_selectedPackage!.totalCredits);
+        }
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
