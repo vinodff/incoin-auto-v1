@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import '../utils/cashfree_mobile.dart'
     if (dart.library.js) '../utils/cashfree_web.dart';
 import '../utils/cashfree_service.dart';
@@ -75,10 +74,6 @@ class _BuyCreditsScreenState extends State<BuyCreditsScreen> {
     setState(() => _isPaymentLoading = true);
 
     final userEmail = _supabaseService.currentUser?.email ?? '';
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Preparing payment...'), duration: Duration(seconds: 2)),
-    );
 
     try {
       final sessionId = await CashfreeService.createOrder(

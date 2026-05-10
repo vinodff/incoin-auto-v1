@@ -5,8 +5,8 @@ class CashfreeService {
   static const _edgeFnUrl =
       'https://cufwqjeqczitnllzpkea.supabase.co/functions/v1/cashfree-create-order';
 
-  /// Creates a Cashfree order via Supabase Edge Function and returns the
-  /// payment_session_id, or throws a descriptive error string.
+  /// Creates a Cashfree order and returns the payment_session_id for the JS SDK.
+  /// Throws a descriptive string on failure.
   static Future<String> createOrder({
     required int amountInRupees,
     required String customerEmail,

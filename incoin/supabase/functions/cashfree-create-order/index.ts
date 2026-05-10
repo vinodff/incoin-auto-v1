@@ -43,15 +43,18 @@ serve(async (req) => {
 
     const data = await response.json();
 
-    if (!response.ok) {
+    if (!response.ok || !data.payment_session_id) {
       return new Response(
-        JSON.stringify({ error: data.message || "Order creation failed" }),
+        JSON.stringify({ error: data.message || JSON.stringify(data) }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     return new Response(
-      JSON.stringify({ payment_session_id: data.payment_session_id }),
+      JSON.stringify({
+        payment_session_id: data.payment_session_id,
+        order_id: orderId,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (err) {
